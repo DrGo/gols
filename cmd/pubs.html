@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <link type="text/css" rel="stylesheet" href="assets/main.css">
+  <style>
+    .article {
+      margin: 2rem;
+    }
+
+    .art-title {
+      font-size: 1.2rem;
+      padding: 1rem 1rem 1rem 0;
+    }
+
+    .art-cite {}
+
+    .art-links {
+      padding: 1rem 1rem 1rem 0;
+     }
+
+    .doi {
+      margin-right: 1rem;
+      color: var(--highlight);
+    }
+
+    .art-abstract {
+      font-size: 0.8rem;
+      display: none;
+    }
+
+    .arrow {
+      border: solid black;
+      border-width: 0 2px 2px 0;
+      display: inline-block;
+      padding: 3px;
+      margin-right: 6px;
+      margin-left: 6px;
+      transform: rotate(45deg);
+    }
+
+    .up {
+      transform: rotate(-135deg);
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <div class="article">
+      <p class="art-title">The reduction in colorectal cancer mortality after colonoscopy varies by site of the cancer
+      </p>
+      <p class="art-cite">Gastroenterology; 139(4):1128-1137</p>
+      <div class="art-links">
+        <a class="doi" href="https://www.doi.org/">DOI: 213123nsada123</a>
+        <i class="arrow"></i><a class="doi" href="#p1" onclick="toggle(this)">Abstract</a>
+      </div>
+      <p class="art-abstract" id="p1">
+        Animal and laboratory studies suggest that regular use of nonsteroidal anti-inflammatory drugs (NSAIDs) may
+        reduce prostate cancer risk. To assess this association, we conducted a systematic review and meta-analysis of
+        observational studies published before January 2003. We derived summary odds ratios (ORs) using both fixed and
+        random effects models and performed subgroup analyses to explore the possible sources of heterogeneity between
+        combined studies. We identified 12 reports (five retrospective and seven prospective studies). Most studies of
+        aspirin use reported inverse associations, but only two were statistically significant. The summary OR for the
+        association between aspirin use and prostate cancer was 0.9 (95% confidence interval: 0.82–0.99; test of
+        homogeneity P= 0.32), and varied from 1.0 for retrospective studies to 0.85 for prospective studies. Studies
+        that measured exposure to a mixture
+      </p>
+    </div>
+    <div class="article">
+      <p class="art-title">The reduction in colorectal cancer mortality after colonoscopy varies by site of the cancer
+      </p>
+      <p class="art-cite">Gastroenterology; 139(4):1128-1137</p>
+      <div class="art-links">
+        <a class="doi" href="https://www.doi.org/">DOI: 213123nsada123</a>
+        <i class="arrow"></i><a class="doi" href="#p2" onclick="toggle(this)">Abstract</a>
+      </div>
+      <p class="art-abstract" id="p2">
+        Animal and laboratory studies suggest that regular use of nonsteroidal anti-inflammatory drugs (NSAIDs) may
+        reduce prostate cancer risk. To assess this association, we conducted a systematic review and meta-analysis of
+        observational studies published before January 2003. We derived summary odds ratios (ORs) using both fixed and
+        random effects models and performed subgroup analyses to explore the possible sources of heterogeneity between
+        combined studies. We identified 12 reports (five retrospective and seven prospective studies). Most studies of
+        aspirin use reported inverse associations, but only two were statistically significant. The summary OR for the
+        association between aspirin use and prostate cancer was 0.9 (95% confidence interval: 0.82–0.99; test of
+        homogeneity P= 0.32), and varied from 1.0 for retrospective studies to 0.85 for prospective studies. Studies
+        that measured exposure to a mixture
+      </p>
+    </div>
+  </main>
+  <script>
+    var toggle = function (elem) {
+      event.preventDefault()
+      target = document.querySelector(elem.hash)
+      console.log(target)
+      if (window.getComputedStyle(target).display === 'block') {
+        target.style.display = 'none'
+      } else {
+        target.style.display = 'block'
+      }
+      elem.previousSibling.classList.toggle("up");
+    }
+  </script>
+</body>
+
+</html>
+
+<!-- label id="label1" for="test">Label 1</label>
+<button id="test">Button</button>
+<label id="label2" for="test">Label 2</label>
+JavaScript
+window.addEventListener("DOMContentLoaded", function() {
+  const button = document.getElementById("test");
+  for(var i = 0; i < button.labels.length; i++) {
+    console.log(button.labels[i].textContent); // "Label 1" and "Label 2"
+  }
+});
+
+
+var filters = document.getElementsByClassName('filter');
+for (var i = 0; i < filters.length; i++) {
+  filters[i].addEventListener('change', filter);
+};
+
+function filter() {
+  // Hide all posts by default
+  var posts = document.getElementsByClassName('item');
+  for (var i = 0; i < posts.length; i++) {
+    posts[i].style.display = 'none';
+  };
+
+  // Run through all filters
+  for (var i = 0; i < filters.length; i++) {
+    // Check if filter is active
+    if (filters[i].checked) {
+      // Get current filter name
+      var curFilter = filters[i].getAttribute('data-filter');
+      // Get all matching elements
+      var visiblePosts = document.getElementsByClassName(curFilter);
+      for (var i = 0; i < visiblePosts.length; i++) {
+        // Show every matching element
+        visiblePosts[i].style.display = 'inline-block';
+      };
+    }
+  };
+} -->
