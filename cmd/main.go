@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+
 	"github.com/drgo/gols"
 )
 
@@ -57,7 +59,7 @@ func main() {
 	// 	defer pprof.StopCPUProfile()
 	// }
   fmt.Println(config)
-  if err :=gols.Serve(&config); err!= nil {
+  if err :=gols.Serve(context.Background(), &config); err!= nil {
     fmt.Printf("%s:%v", os.Args[0], err)
   }
 }

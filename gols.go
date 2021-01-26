@@ -32,6 +32,12 @@ type Config struct {
 	Quiet         bool
 	Proxy         string
 	AllowDotFiles bool
+	// if true, changes to FS contents cause the browser to reload the changed files
+	LiveRelood bool
+	// ReadTimeout:  5 * time.Second,
+	// WriteTimeout: 10 * time.Second,
+	// IdleTimeout:  15 * time.Second,
+	AllowCatching bool
 }
 
 const (
@@ -39,7 +45,7 @@ const (
 	defaultHost = "localhost"
 )
 
-func ValidConfig(config *Config) (*Config, error) {
+func validateConfig(config *Config) (*Config, error) {
 	if config == nil {
 		config = &Config{}
 	}
@@ -62,27 +68,40 @@ func ValidConfig(config *Config) (*Config, error) {
 		}
 		config.Addr = config.Host + ":" + config.Port
 	}
+	// ReadTimeout:  5 * time.Second,
+	// WriteTimeout: 10 * time.Second,
+	// IdleTimeout:  15 * time.Second,
 	return config, nil
 }
 
 type Server struct {
-  config *Config
-	mux *http.ServeMux
-	srv *http.Server
+	config *Config
+	mux    *http.ServeMux
+	srv    *http.Server
 }
 
 func NewServer(config *Config) (*Server, error) {
-	config, err := ValidConfig(config)
+	config, err := validateConfig(config)
 	if err != nil {
 		return nil, err
 	}
 
 	mux := http.NewServeMux()
-	fs := FS{fs: http.Dir(config.Root), entry: "index.html"}
+	fs := FS{
+    // FIXME: allow fs to be passed in config
+		fs:            http.Dir(config.Root),
+		entry:         "index.html",
+		BeforeServing: injectReloadJS,
+		AllowDotFiles: config.AllowDotFiles,
+	}
+	if config.LiveRelood {
+		reloader := NewReloader()
+		mux.Handle("/ws", reloader)
+	}
 	mux.Handle("/", NoCacheHandler(http.FileServer(fs)))
 	s := &Server{
-    config: config,
-		mux: mux,
+		config: config,
+		mux:    mux,
 		srv: &http.Server{
 			Addr:    config.Addr,
 			Handler: mux,
@@ -93,22 +112,22 @@ func NewServer(config *Config) (*Server, error) {
 			// IdleTimeout:  15 * time.Second,
 		},
 	}
-	return s,nil
+	return s, nil
 }
 
 func (s *Server) Finalize() {
 }
 
 // Serve Starts a live server with config
-func Serve(config *Config) error {
+func Serve(ctx context.Context, config *Config) error {
 	s, err := NewServer(config)
-	if err!= nil {
-	return err
-  }
-	return s.Serve()
+	if err != nil {
+		return err
+	}
+	return s.Serve(ctx)
 }
 
-func (s *Server) Serve() (err error) {
+func (s *Server) Serve(ctx context.Context) (err error) {
 	if !s.config.Quiet {
 		Logln("Serving folder:")
 		Logln("   " + s.config.Root)
@@ -120,9 +139,14 @@ func (s *Server) Serve() (err error) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	done := make(chan interface{}) // chan to ensure that we do not exist before s.Shutdown() is done
+
 	go func() {
-		<-stop // blocks until it receives an interrupt signal
-		Logf("\nserver stopping...\n")
+		select { //block until interrupted or cancelled
+		case <-stop: // we received an interrupt signal
+			Logf("\nserver interrupted. stopping...\n")
+		case <-ctx.Done():
+			Logf("\nserver cancelled. stopping...\n")
+		}
 		// allow time for all goroutines to finish
 		ctxWait, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -134,22 +158,7 @@ func (s *Server) Serve() (err error) {
 	}()
 	// open in browser if requested
 	if s.config.Open {
-		go func() {
-			time.Sleep(time.Second)
-			// https://stackoverflow.com/questions/39320371/how-start-web-server-to-open-page-in-browser-in-golang
-			var cmd string
-			var args []string
-			switch runtime.GOOS {
-			case "windows":
-				cmd = "cmd"
-				args = []string{"/c", "start"}
-			case "darwin":
-				cmd = "open"
-			default: // "linux", "freebsd", "openbsd", "netbsd"
-				cmd = "xdg-open"
-			}
-			_ = exec.Command(cmd, append(args, "http://"+s.config.Addr)...).Start()
-		}()
+		go broswe(s.config.Addr)
 	}
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("failed to start server on %s: %v", s.config.Addr, err)
@@ -189,6 +198,23 @@ func NoCacheHandler(h http.Handler) http.HandlerFunc {
 		}
 		h.ServeHTTP(w, r)
 	}
+}
+
+func broswe(addr string) {
+	time.Sleep(time.Second)
+	// https://stackoverflow.com/questions/39320371/how-start-web-server-to-open-page-in-browser-in-golang
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start"}
+	case "darwin":
+		cmd = "open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
+	}
+	_ = exec.Command(cmd, append(args, "http://"+addr)...).Start()
 }
 
 // func getIPAddr() {

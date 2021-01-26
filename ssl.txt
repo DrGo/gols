@@ -1,0 +1,41 @@
+if !*insecure {
+		// If a certificate at server.pem exists, load it, otherwise generate one dynamically
+		var tlsCert tls.Certificate
+		caCertPath := filepath.Join(*sslPath, "cacert.pem")
+		serverCertPath := filepath.Join(*sslPath, "server.pem")
+		serverKeyPath := filepath.Join(*sslPath, "server.key")
+		if _, err := os.Stat(serverCertPath); err == nil {
+			// Load static cert at server.pem:
+			log.Debugln("server.pem exists. Loading cert.")
+			tlsCert, err = tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+			if err != nil {
+				log.Fatalln("Error reading", serverCertPath, err)
+			}
+		} else {
+			// Check that CA cert required to sign/generate server and client exists, generating if needed:
+			if _, err := os.Stat(caCertPath); err != nil {
+				log.Debugln("CA certificate at cacert.pem does not exist, generating it...")
+				certs.GenerateCACert(*sslPath)
+			}
+			if gs.cfg.TLSHostname == "" {
+				log.Fatalln("Error: Unable to dynamically generate server cert with blank hostname. Please configure 'TLSostname' in server config.")
+			}
+			// Generate certificates dynamically:
+			log.Debugln("Generating certificate dynamically for", gs.cfg.TLSHostname)
+			tlsCert = certs.GenerateServerCert(gs.cfg.TLSHostname, *sslPath)
+		}
+
+		caCert, err := ioutil.ReadFile(caCertPath)
+		if err != nil {
+			log.Fatalln("Error reading", caCertPath, err)
+		}
+		certPool := x509.NewCertPool()
+		if success := certPool.AppendCertsFromPEM(caCert); !success {
+			log.Fatalln("Cannot append certs from PEM to certpool.")
+		}
+
+		creds = credentials.NewTLS(&tls.Config{
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			Certificates: []tls.Certificate{tlsCert},
+			ClientCAs:    certPool,
+		})
