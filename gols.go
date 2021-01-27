@@ -4,6 +4,7 @@ package gols
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,32 +13,82 @@ import (
 	"time"
 )
 
+// * @param watch {array} Paths to exclusively watch for changes
+// * @param ignore {array} Paths to ignore when watching files for changes
+// * @param ignorePattern {regexp} Ignore files by RegExp
+// * @param mount {array} Mount directories onto a route, e.g. [['/components', './node_modules']].
+// * @param wait {number} Server will wait for all changes, before reloading
+// * @param file {string} Path to the entry point file
+// * @param htpasswd {string} Path to htpasswd file to enable HTTP Basic authentication
+
+// Config used to configure the server
+// A Server defines parameters for running an HTTP server.
+// The zero value for Server is a valid configuration.
 type Config struct {
+	// Addr optionally specifies the TCP address for the server to listen on,
+	// in the form "host:port". If empty, the values of Host:Port are used.
+	// The service names are defined in RFC 6335 and assigned by IANA.
 	Addr string
-	// * @param watch {array} Paths to exclusively watch for changes
-	// * @param ignore {array} Paths to ignore when watching files for changes
-	// * @param ignorePattern {regexp} Ignore files by RegExp
-	// * @param mount {array} Mount directories onto a route, e.g. [['/components', './node_modules']].
-	// * @param logLevel {number} 0 = errors only, 1 = some, 2 = lots
-	// * @param file {string} Path to the entry point file
-	// * @param wait {number} Server will wait for all changes, before reloading
-	// * @param htpasswd {string} Path to htpasswd file to enable HTTP Basic authentication
-	Host          string
-	Port          string
+
+	// Host optionally specifies the host name. Default "localhost."
+	Host string
+
+	// Port optionally specifies the port number. Default 5500.
+	Port string
+
 	Root          string
-	CORS          bool
+	CORS          bool //TODO
 	Open          bool
-	Watch         bool
-	Ignore        string
+	Ignore        string //TODO:?
 	Quiet         bool
-	Proxy         string
+	Proxy         string //TODO:
 	AllowDotFiles bool
 	// if true, changes to FS contents cause the browser to reload the changed files
 	LiveRelood bool
-	// ReadTimeout:  5 * time.Second,
-	// WriteTimeout: 10 * time.Second,
-	// IdleTimeout:  15 * time.Second,
-	AllowCatching bool
+
+	AllowCaching bool
+
+	/// ReadTimeout is the maximum duration for reading the entire
+	// request, including the body.
+	//
+	// Because ReadTimeout does not let Handlers make per-request
+	// decisions on each request body's acceptable deadline or
+	// upload rate, most users will prefer to use
+	// ReadHeaderTimeout. It is valid to use them both.
+	// Default is 5 secs.
+	ReadTimeout time.Duration
+
+	// ReadHeaderTimeout is the amount of time allowed to read
+	// request headers. The connection's read deadline is reset
+	// after reading the headers and the Handler can decide what
+	// is considered too slow for the body. If ReadHeaderTimeout
+	// is zero, the value of ReadTimeout is used. If both are
+	// zero, default of 5 secs is used.
+	ReadHeaderTimeout time.Duration
+
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response. It is reset whenever a new
+	// request's header is read. Like ReadTimeout, it does not
+	// let Handlers make decisions on a per-request basis.
+	WriteTimeout time.Duration
+
+	// IdleTimeout is the maximum amount of time to wait for the
+	// next request when keep-alives are enabled. If IdleTimeout
+	// is zero, it defaults to 15 secs.
+	IdleTimeout time.Duration
+
+	// MaxHeaderBytes controls the maximum number of bytes the
+	// server will read parsing the request header's keys and
+	// values, including the request line. It does not limit the
+	// size of the request body.
+	// If zero, DefaultMaxHeaderBytes is used.
+	MaxHeaderBytes int
+
+	// ErrorLog specifies an optional logger for errors accepting
+	// connections, unexpected behavior from handlers, and
+	// underlying FileSystem errors.
+	// If nil, logging is done via the log package's standard logger.
+	ErrorLog *log.Logger
 }
 
 const (
@@ -68,9 +119,18 @@ func validateConfig(config *Config) (*Config, error) {
 		}
 		config.Addr = config.Host + ":" + config.Port
 	}
-	// ReadTimeout:  5 * time.Second,
-	// WriteTimeout: 10 * time.Second,
-	// IdleTimeout:  15 * time.Second,
+	if config.ReadTimeout == 0 {
+		config.ReadTimeout = 5 * time.Second
+	}
+	if config.WriteTimeout == 0 {
+		config.WriteTimeout = 10 * time.Second
+	}
+	if config.IdleTimeout == 0 {
+		config.IdleTimeout = 15 * time.Second
+	}
+	if config.ErrorLog == nil {
+		config.ErrorLog = log.New(os.Stderr, "gols:", log.LstdFlags)
+	}
 	return config, nil
 }
 
@@ -80,7 +140,7 @@ type Server struct {
 	srv    *http.Server
 }
 
-func NewServer(config *Config) (*Server, error) {
+func NewServer(ctx context.Context, config *Config) (*Server, error) {
 	config, err := validateConfig(config)
 	if err != nil {
 		return nil, err
@@ -88,17 +148,23 @@ func NewServer(config *Config) (*Server, error) {
 
 	mux := http.NewServeMux()
 	fs := FS{
-    // FIXME: allow fs to be passed in config
+		// FIXME: allow fs to be passed in config
 		fs:            http.Dir(config.Root),
 		entry:         "index.html",
-		BeforeServing: injectReloadJS,
+		root:          config.Root,
 		AllowDotFiles: config.AllowDotFiles,
 	}
 	if config.LiveRelood {
-		reloader := NewReloader()
+		reloader := NewReloader(ctx, config.Addr)
+		fs.BeforeServing = reloader.injectReloadJS
+		fs.AfterServing = reloader.watchFiles
 		mux.Handle("/ws", reloader)
 	}
-	mux.Handle("/", NoCacheHandler(http.FileServer(fs)))
+	if config.AllowCaching {
+		mux.Handle("/", http.FileServer(fs))
+	} else {
+		mux.Handle("/", NoCacheHandler(http.FileServer(fs)))
+	}
 	s := &Server{
 		config: config,
 		mux:    mux,
@@ -107,9 +173,10 @@ func NewServer(config *Config) (*Server, error) {
 			Handler: mux,
 			//FIXME: redirect server logs to app logs?
 			//ErrorLog:     logger,
-			// ReadTimeout:  5 * time.Second,
-			// WriteTimeout: 10 * time.Second,
-			// IdleTimeout:  15 * time.Second,
+			ReadTimeout:    config.ReadTimeout,
+			WriteTimeout:   config.WriteTimeout,
+			IdleTimeout:    config.IdleTimeout,
+			MaxHeaderBytes: config.MaxHeaderBytes,
 		},
 	}
 	return s, nil
@@ -120,7 +187,7 @@ func (s *Server) Finalize() {
 
 // Serve Starts a live server with config
 func Serve(ctx context.Context, config *Config) error {
-	s, err := NewServer(config)
+	s, err := NewServer(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -129,10 +196,8 @@ func Serve(ctx context.Context, config *Config) error {
 
 func (s *Server) Serve(ctx context.Context) (err error) {
 	if !s.config.Quiet {
-		Logln("Serving folder:")
-		Logln("   " + s.config.Root)
-		Logln("Running at:")
-		Logln("   http://" + s.config.Addr)
+		Logln("Serving folder:\n    " + s.config.Root)
+		Logln("Running at:\n   http://" + s.config.Addr)
 		Logln("Press ctrl+c to exit.")
 	}
 	// gracefully handle keyboard interruptions ctrl+c etc
@@ -164,7 +229,7 @@ func (s *Server) Serve(ctx context.Context) (err error) {
 		return fmt.Errorf("failed to start server on %s: %v", s.config.Addr, err)
 	}
 	<-done //block until shutdown is complete
-	Logf("\nserver stopped...\n")
+	Logf("\nserver stopped\n")
 	return nil
 }
 

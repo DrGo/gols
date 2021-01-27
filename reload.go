@@ -1,13 +1,12 @@
 package gols
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -63,32 +62,41 @@ type Reloader struct {
 	clients     map[string]*Client
 	toWatch     chan string
 	watchEvents chan watcher.Event
+	Addr        string
 }
 
-func NewReloader(ctx context.Context) *Reloader {
+func NewReloader(ctx context.Context, addr string) *Reloader {
 	re := &Reloader{
 		clients:     make(map[string]*Client),
 		toWatch:     make(chan string, 24),
 		watchEvents: make(chan watcher.Event, 24),
+		Addr:        addr,
 	}
 	//launch watcher
-	go watcher.Watch(ctx, re.toWatch, re.watchEvents)
+	go func() {
+		err := watcher.Watch(ctx, re.toWatch, re.watchEvents)
+		if err != nil {
+			Logf("watcher.watch failed: %v\n", err)
+		}
+	}()
 	// launch watch events handler
 	go func() {
 		for {
 			select {
 			case event := <-re.watchEvents:
-			  if event.IsWrite() {
-			    re.Reload(event.Name)
-			  }
+				if event.IsWrite() {
+				  Logln("recieved watch-event:" + event.String())
+					re.Reload(event.Name)
+				}
 			case <-ctx.Done():
-        close(re.watchEvents)  // ? needed ? impact
-        return
+				close(re.watchEvents) // ? needed ? impact
+				return
 			}
 		}
 	}()
 	return re
 }
+
 func (re *Reloader) Remove(path string) {
 	re.Lock()
 	defer re.Unlock()
@@ -107,66 +115,103 @@ func (re *Reloader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// upgrade this connection to a WebSocket connection
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		Logln(err)
+		return
+	}
+	path := r.URL.Query().Get("id")
+	if path == "" {
+		Logln("invalid id websocket query")
 		return
 	}
 	// add as a client
 	c := &Client{ws: ws, send: make(chan []byte, msgBufSize)}
 	re.Lock()
-	re.clients[r.URL.Path] = c
+	re.clients[path] = c
 	re.Unlock()
+  Logln("relaod.ServeHTTP: added client for:" + path)
 	// remove client when connection closed
-	defer re.Remove(r.URL.Path)
+	defer re.Remove(path)
 	// wait for reads and writes
 	go c.Write()
 	c.Read()
 }
 
 func (re *Reloader) Reload(path string) error {
+	// Logln("reloading " + path)
 	re.RLock()
 	c, ok := re.clients[path]
-	re.Unlock()
+	re.RUnlock()
 	if !ok {
+		Logln("error relaoding: not watching this file: " + path)
 		return fmt.Errorf("not connected to %s", path)
 	}
 	select {
 	case c.send <- msgReload: //send reload msg
+		Logln("sent reload to " + path)
 	default: //cannot send
 		re.Remove(path)
+		Logln("failed to reload " + path)
 	}
 	return nil
 }
 
-func injectReloadJS(f http.File, name string, mode fs.FileMode) (http.File, error) {
-	// fmt.Println("injectReloadJS:", name, mode.String())
+func (re *Reloader) watchFiles(_ http.File, name string, mode fs.FileMode) (http.File, error) {
+	// Logln("watchFiles:", name, mode.String())
 	if mode.IsDir() || !strings.HasPrefix(filepath.Ext(name), ".htm") {
 		return nil, nil
 	}
-	buf, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-	var bodyTag = []byte("</body>")
-	buf = bytes.Replace(buf, bodyTag, append(reloadJS, bodyTag...), 1)
-	bf, err := NewFromReader(bytes.NewReader(buf), name, mode)
-	if err != nil {
-		return nil, err
-	}
-	_, err = bf.Seek(0, 0)
+	re.toWatch <- name
+	return nil, nil
+}
 
+// func (re *Reloader) URLNameToPath(name string) string {
+// 	return filepath.Clean(filepath.Join(re.Addr, name))
+// }
+
+// func (re *Reloader) PathToURLName(path string) string {
+//   return strings.TrimPrefix(path, re.Addr)
+// }
+
+func (re *Reloader) injectReloadJS(f http.File, name string, mode fs.FileMode) (http.File, error) {
+	// Logln("injectReloadJS:", name, mode.String())
+	if mode.IsDir() || !strings.HasPrefix(filepath.Ext(name), ".htm") {
+		return nil, nil
+	}
+  buf, err := io.ReadAll(f)
+  if err != nil {
+    return nil, fmt.Errorf("cannot inject file %s:%s", name, err)
+  }
+  url := append([]byte(re.Addr+"/ws?id="), []byte(url.QueryEscape(name))...)
+	bf := NewFile(concatSlices([][]byte{buf, reloadJSOpen, url, reloadJSClose}), name, mode)
+	_, err = bf.Seek(0, 0)
 	if err != nil {
 		return nil, err
 	}
 	err = f.Close()
-
 	if err != nil {
 		return nil, err
 	}
 	return bf, nil
 }
 
-var reloadJS = []byte(`
-<script>var socket = new WebSocket("ws://localhost:5500/ws");
+func concatSlices(slices [][]byte) []byte {
+    var size int
+    for _, s := range slices {
+        size += len(s)
+    }
+    tmp := make([]byte,size)
+    var i int
+    for _, s := range slices {
+        i += copy(tmp[i:], s)
+    }
+    return tmp
+}
+
+var (
+	reloadJSOpen = []byte(`
+<script>var socket = new WebSocket("ws://`)
+
+	reloadJSClose = []byte(`");
 socket.onmessage = function(event) {
   console.log(event)
    switch(event.data) {
@@ -184,3 +229,4 @@ socket.onmessage = function(event) {
 }
 </script>
 `)
+)

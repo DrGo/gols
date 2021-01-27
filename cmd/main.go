@@ -21,9 +21,10 @@ const (
 
 func init() {
 	flag.StringVar(&config.Port, "port", defaultPort, "listening port (0 for random; default"+defaultPort+")")
-	flag.BoolVar(&config.Open, "open", true, "open first page in a browser automatically")
 	flag.StringVar(&config.Host, "host", defaultHost, "Address to bind to (default:"+defaultHost+")")
 	flag.StringVar(&config.Root, "root", "", "Path to root directory (default: cwd)")
+  flag.BoolVar(&config.Open, "open", true, "open first page in a browser automatically (default: true)")
+  flag.BoolVar(&config.LiveRelood, "reload", true, "reload browser when source file changes (default: true)")
 
 	// file: file,
 	// open: false,
@@ -58,7 +59,7 @@ func main() {
 	// 	pprof.StartCPUProfile(f)
 	// 	defer pprof.StopCPUProfile()
 	// }
-  fmt.Println(config)
+  fmt.Printf("%+v\n", config)
   if err :=gols.Serve(context.Background(), &config); err!= nil {
     fmt.Printf("%s:%v", os.Args[0], err)
   }

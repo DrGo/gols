@@ -25,13 +25,17 @@ type FS struct {
 	AllowDotFiles bool
 	// if false(default), attempts to navigate to a dir return 404 error instead of dir listing
 	AllowDirListing bool
-  //
+	//
 	BeforeServing func(hf http.File, name string, mode fs.FileMode) (http.File, error)
+	AfterServing  func(hf http.File, name string, mode fs.FileMode) (http.File, error)
 }
 
 // Open rigged to disable dir listing
 func (anfs FS) Open(path string) (http.File, error) {
-	fmt.Println("opening:" + path)
+	fullPath := filepath.Clean(filepath.Join(anfs.root, path))
+	if filepath.Ext(path) == ".html" {
+	  fmt.Println("opening:" + fullPath)
+  }  
 	if !anfs.AllowDotFiles && hasDotPrefix(path) {
 		return nil, fmt.Errorf("forbidden")
 	}
@@ -56,11 +60,14 @@ func (anfs FS) Open(path string) (http.File, error) {
 		}
 	}
 	if anfs.BeforeServing != nil {
-		modf, err := anfs.BeforeServing(f, path, fi.Mode())
+		modf, err := anfs.BeforeServing(f, fullPath, fi.Mode())
 		if err != nil {
 			fmt.Println(err)
 			return nil, err
 		} else if modf != nil { //skipped eg not a file
+			if anfs.AfterServing != nil {
+				defer anfs.AfterServing(modf, fullPath, fi.Mode())
+			}
 			return modf, nil
 		}
 	}
@@ -82,6 +89,12 @@ type File struct {
 	*filebuffer.Buffer
 	name string
 	mode fs.FileMode
+}
+
+
+func NewFile(buf []byte, name string, mode fs.FileMode) *File {
+	f := filebuffer.New(buf)
+	return &File{f, name, mode}
 }
 
 func NewFromReader(r io.Reader, name string, mode fs.FileMode) (*File, error) {
