@@ -140,7 +140,7 @@ func (re *Reloader) Reload(path string) error {
 	// Logln("reloading " + path)
 	re.RLock()
 	c, ok := re.clients[path]
-	re.RUnlock()
+	defer re.RUnlock()
 	if !ok {
 		Logln("error relaoding: not watching this file: " + path)
 		return fmt.Errorf("not connected to %s", path)
@@ -209,24 +209,33 @@ func concatSlices(slices [][]byte) []byte {
 
 var (
 	reloadJSOpen = []byte(`
-<script>var socket = new WebSocket("ws://`)
+<script>
+function ws_connect() {
+  var socket = new WebSocket("ws://`)
 
+//see https://javascript.info/websocket
 	reloadJSClose = []byte(`");
-socket.onmessage = function(event) {
-  console.log(event)
+ socket.onclose = function(event) {
+    console.log("Websocket connection failed or closed." + event.reason);
+    socket = null;  //clean up last socket
+    // Set an interval to continue trying to reconnect
+    // setTimeout(function() {
+    //   ws_connect();
+    // }, 5000)
+  }
+ socket.onmessage = function(event) {
    switch(event.data) {
      case "reload":
-       // 1000 = "Normal closure" and the second parameter is a
-       // human-readable reason.
-       socket.close(1000, "Reloading page after receiving reload");
+       socket.close(1000, "Reloading page.."); //1000=normal closure
        console.log("Reloading page after receiving build_complete");
        location.reload(true);
        break;
-
      default:
-       console.log("recieved message:",event.data)
+       console.log("recieved message:",event.data) //debug only
   }
+ }
 }
+ws_connect()
 </script>
 `)
 )
