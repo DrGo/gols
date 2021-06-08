@@ -196,8 +196,7 @@ func Serve(ctx context.Context, config *Config) error {
 
 func (s *Server) Serve(ctx context.Context) (err error) {
 	if !s.config.Quiet {
-		Logln("Serving folder:\n    " + s.config.Root)
-		Logln("Running at:\n   http://" + s.config.Addr)
+    Logf("Serving %s at %s\n", s.config.Root, s.config.Addr)
 		Logln("Press ctrl+c to exit.")
 	}
 	// gracefully handle keyboard interruptions ctrl+c etc
